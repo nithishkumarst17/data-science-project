@@ -1,0 +1,81 @@
+import numpy as np
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+
+# Fix randomness
+np.random.seed(42)
+
+# Generate dataset
+num_employees = 500
+employee_ids = [f"E{str(i+1).zfill(3)}" for i in range(num_employees)]
+
+data = []
+for emp in employee_ids:
+    attendance = np.random.randint(50, 100)
+    avg_work_hours = np.random.uniform(6, 10)
+    late_punch = np.random.randint(0, 15)
+    leaves_taken = np.random.randint(0, 10)
+    department = np.random.choice(['Sales', 'Support', 'IT', 'Marketing', 'HR'])
+    performance = np.random.uniform(5, 10)
+
+    # Attrition probability
+    if attendance < 70 or late_punch > 10 or performance < 6:
+        attrition_prob = 0.7
+    else:
+        attrition_prob = 0.1
+
+    rng_value = np.random.rand()
+    attrition_flag = 'Yes' if rng_value < attrition_prob else 'No'
+
+    data.append([
+        emp, attendance, avg_work_hours, late_punch,
+        leaves_taken, department, performance, attrition_flag
+    ])
+
+# Create DataFrame
+df = pd.DataFrame(data, columns=[
+    'Employee_ID', 'Attendance_Percentage', 'Avg_Work_Hours', 'Late_Punch_Count',
+    'Leaves_Taken', 'Department', 'Performance_Score', 'Attrition_Flag'
+])
+
+# Preprocessing
+df_model = pd.get_dummies(df, columns=['Department'], drop_first=True)
+X = df_model.drop(['Employee_ID', 'Attrition_Flag'], axis=1)
+y = df_model['Attrition_Flag'].map({'Yes': 1, 'No': 0})
+
+# Train-test split
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42
+)
+
+# Model training
+rf_model = RandomForestClassifier(n_estimators=100, random_state=42)
+rf_model.fit(X_train, y_train)
+
+# Evaluation
+y_pred = rf_model.predict(X_test)
+accuracy = accuracy_score(y_test, y_pred)
+print(f"Model Accuracy: {accuracy:.2f}\n")
+print("Classification Report:")
+print(classification_report(y_test, y_pred))
+print("\nConfusion Matrix:")
+print(confusion_matrix(y_test, y_pred))
+
+# Sample employee prediction (aligned with training features)
+sample_employee = pd.DataFrame({
+    'Attendance_Percentage':[65],
+    'Avg_Work_Hours':[7.5],
+    'Late_Punch_Count':[12],
+    'Leaves_Taken':[4],
+    'Performance_Score':[5.5],
+    'Department_IT':[0],
+    'Department_Marketing':[0],
+    'Department_Support':[1],
+    'Department_Sales':[0]
+})
+sample_employee = sample_employee.reindex(columns=X.columns, fill_value=0)
+
+pred = rf_model.predict(sample_employee)[0]
+print(f"\nSample Employee Attrition Prediction: {'Yes' if pred==1 else 'No'}")
