@@ -1,0 +1,133 @@
+import re
+import string
+import numpy as np
+import pandas as pd
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+import joblib
+import os
+
+MODEL_PATH = "spam_model.joblib"
+VECTORIZER_PATH = "tfidf_vectorizer.joblib"
+
+def clean_text(text: str) -> str:
+    text = text.lower()
+    text = re.sub(r'https?://\S+|www\.\S+', ' URL ', text)
+    text = re.sub(r'\S+@\S+', ' EMAIL ', text)
+    text = re.sub(r'\d{2,}', ' NUM ', text)
+    text = text.translate(str.maketrans('', '', string.punctuation))
+    return re.sub(r'\s+', ' ', text).strip()
+
+def extract_metadata(body: str, subject: str, sender: str, attachments: list):
+    urls = re.findall(r'https?://\S+|www\.\S+', body + ' ' + subject)
+    links_count = len(urls)
+    attachments_count = len(attachments)
+    domain = sender.split("@")[-1].lower() if "@" in sender else ""
+    suspicious_domains = ['cheap', 'free', 'offer', 'win', 'prize']
+    domain_flag = int(any(sd in domain for sd in suspicious_domains))
+    body_len = len(body)
+    subject_len = len(subject)
+    return [links_count, attachments_count, domain_flag, body_len, subject_len]
+
+def train_model():
+    n = 5000
+    np.random.seed(42)
+    subjects, bodies, labels = [], [], []
+    for i in range(n):
+        if np.random.rand() < 0.2:
+            subjects.append("Win a free prize offer")
+            bodies.append("Click http://spam.example to claim your reward")
+            labels.append(1)
+        else:
+            subjects.append("Order confirmation")
+            bodies.append("Thanks for your order. ID 12345. Delivery soon.")
+            labels.append(0)
+    df = pd.DataFrame({"subject": subjects, "body": bodies, "label": labels})
+
+    texts = [clean_text(s + " " + b) for s, b in zip(df['subject'], df['body'])]
+    vectorizer = TfidfVectorizer(max_features=5000, ngram_range=(1,2))
+    X_text = vectorizer.fit_transform(texts)
+
+    meta = np.array([extract_metadata(b, s, "", []) for s, b in zip(df['subject'], df['body'])])
+    from scipy.sparse import hstack
+    X = hstack([X_text, meta])
+
+    X_train, X_test, y_train, y_test = train_test_split(X, df['label'], test_size=0.2, random_state=42)
+    clf = LogisticRegression(max_iter=1000)
+    clf.fit(X_train, y_train)
+
+    y_pred = clf.predict(X_test)
+    metrics = {
+        "accuracy": accuracy_score(y_test, y_pred),
+        "precision": precision_score(y_test, y_pred),
+        "recall": recall_score(y_test, y_pred),
+        "f1": f1_score(y_test, y_pred)
+    }
+
+    joblib.dump(clf, MODEL_PATH)
+    joblib.dump(vectorizer, VECTORIZER_PATH)
+    return metrics
+
+def load_model():
+    if not os.path.exists(MODEL_PATH) or not os.path.exists(VECTORIZER_PATH):
+        return None, None
+    clf = joblib.load(MODEL_PATH)
+    vectorizer = joblib.load(VECTORIZER_PATH)
+    return clf, vectorizer
+
+def predict_email(subject: str, body: str, sender: str = "", attachments: list = []):
+    clf, vectorizer = load_model()
+    if clf is None or vectorizer is None:
+        train_model()
+        clf, vectorizer = load_model()
+
+    text = clean_text(subject + " " + body)
+    X_text = vectorizer.transform([text])
+    meta = np.array([extract_metadata(body, subject, sender, attachments)])
+    from scipy.sparse import hstack
+    X = hstack([X_text, meta])
+
+    prob = clf.predict_proba(X)[0][1]
+    return {"is_spam": int(prob >= 0.5), "spam_probability": round(prob, 4)}
+
+def predict_batch(emails: list):
+    clf, vectorizer = load_model()
+    if clf is None or vectorizer is None:
+        train_model()
+        clf, vectorizer = load_model()
+
+    texts = [clean_text(e["subject"] + " " + e["body"]) for e in emails]
+    X_text = vectorizer.transform(texts)
+    meta = np.array([extract_metadata(e["body"], e["subject"], e.get("sender",""), e.get("attachments",[])) for e in emails])
+    from scipy.sparse import hstack
+    X = hstack([X_text, meta])
+
+    probs = clf.predict_proba(X)[:, 1]
+    results = []
+    for i, prob in enumerate(probs):
+        results.append({
+            "subject": emails[i]["subject"],
+            "is_spam": int(prob >= 0.5),
+            "spam_probability": round(prob, 4)
+        })
+    return results
+
+if __name__ == "__main__":
+    metrics = train_model()
+    print("Training metrics:", metrics)
+
+    single_email = {
+        "subject": "Win a free iPhone now",
+        "body": "Click http://spam.example to claim your prize",
+        "sender": "offers@spam.example",
+        "attachments": []
+    }
+    print("Single Prediction:", predict_email(**single_email))
+
+    batch_emails = [
+        single_email,
+        {"subject": "Order confirmation", "body": "Your order has been shipped", "sender": "shop@ecommerce.com", "attachments": []}
+    ]
+    print("Batch Predictions:", predict_batch(batch_emails))
