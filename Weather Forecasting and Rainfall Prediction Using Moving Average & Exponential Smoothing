@@ -1,0 +1,122 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from datetime import datetime, timedelta
+import logging
+
+logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+
+NUM_PAST_DAYS = 3
+NUM_FUTURE_DAYS = 7
+HOURS_PER_DAY = 24
+MA_PERIOD = 5
+EMA_SPAN = 5
+FRACTION = 0.2
+
+def add_rain_columns(df):
+    df["rain_occurred"] = np.where(df["rain_prob"] > 50, "Yes", "No")
+    df["rain_cm"] = df["rain_occurred"].apply(lambda x: round(np.random.uniform(0.1, 5.0), 1) if x=="Yes" else 0.0)
+    return df
+
+def generate_historical_weather(past_days):
+    now = datetime.now()
+    data = []
+    for day in range(past_days):
+        for hour in range(HOURS_PER_DAY):
+            dt = now - timedelta(days=(past_days - day), hours=(HOURS_PER_DAY - hour))
+            temp = np.random.uniform(25, 35)
+            humidity = np.random.uniform(50, 80)
+            wind = np.random.uniform(5, 15)
+            rain_prob = np.random.uniform(0, 100)
+            data.append({
+                "datetime": dt,
+                "temperature": round(temp, 1),
+                "humidity": round(humidity, 1),
+                "wind_kmh": round(wind, 1),
+                "rain_prob": round(rain_prob, 1)
+            })
+    df = pd.DataFrame(data)
+    return add_rain_columns(df)
+
+def compute_forecast(df, column, ma_period=MA_PERIOD, ema_span=EMA_SPAN, fraction=FRACTION):
+    df[column + "_MA"] = df[column].rolling(window=ma_period).mean()
+    df[column + "_EMA"] = df[column].ewm(span=ema_span, adjust=False).mean()
+    latest_ma = df[column + "_MA"].iloc[-1]
+    latest_ema = df[column + "_EMA"].iloc[-1]
+    min_val = df[column].min()
+    max_val = df[column].max()
+    value_range = max_val - min_val
+    if latest_ema > latest_ma:
+        forecast = df[column].iloc[-1] + fraction * value_range
+    elif latest_ema < latest_ma:
+        forecast = df[column].iloc[-1] - fraction * value_range
+    else:
+        forecast = df[column].iloc[-1]
+    return forecast
+
+def forecast_next_days(df, future_days):
+    last_datetime = df["datetime"].iloc[-1]
+    future_data = []
+    for i in range(future_days * HOURS_PER_DAY):
+        dt = last_datetime + timedelta(hours=i+1)
+        temp = compute_forecast(df, "temperature")
+        humidity = compute_forecast(df, "humidity")
+        wind = compute_forecast(df, "wind_kmh")
+        rain_prob = compute_forecast(df, "rain_prob")
+        row = {
+            "datetime": dt,
+            "temperature": round(temp,1),
+            "humidity": round(humidity,1),
+            "wind_kmh": round(wind,1),
+            "rain_prob": round(rain_prob,1)
+        }
+        future_data.append(row)
+        df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
+    df_future = pd.DataFrame(future_data)
+    return add_rain_columns(df_future)
+
+def plot_forecast(df):
+    plt.figure(figsize=(18,6))
+    plt.plot(df["datetime"], df["temperature"], 'r-', label="Temperature (°C)")
+    plt.plot(df["datetime"], df["humidity"], 'b-', label="Humidity (%)")
+    plt.plot(df["datetime"], df["wind_kmh"], 'g-', label="Wind Speed (km/h)")
+    plt.plot(df["datetime"], df["rain_prob"], 'c-', label="Rain Probability (%)")
+    plt.xlabel("Date & Time")
+    plt.ylabel("Values")
+    plt.title("Weather Forecast")
+    plt.legend()
+    plt.grid(True)
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.show()
+
+def compute_daily_summary(df):
+    df["date"] = df["datetime"].dt.date
+    summary = df.groupby("date").agg({
+        "temperature": ["mean", "min", "max"],
+        "humidity": "mean",
+        "wind_kmh": "mean",
+        "rain_prob": "mean",
+        "rain_cm": "sum"
+    }).round(1)
+    summary.columns = ["Temp_Avg", "Temp_Min", "Temp_Max", "Humidity_Avg", "Wind_Avg", "RainProb_Avg", "Rain_Total_cm"]
+    return summary
+
+def main():
+    df_past = generate_historical_weather(NUM_PAST_DAYS)
+    logging.info("Historical past 3 days weather data:")
+    print(df_past.head(24))
+
+    df_future = forecast_next_days(df_past.copy(), NUM_FUTURE_DAYS)
+    logging.info("Forecasted next 7 days weather data:")
+    print(df_future.head(24))
+
+    df_all = pd.concat([df_past, df_future], ignore_index=True)
+    plot_forecast(df_all)
+
+    daily_summary = compute_daily_summary(df_all)
+    logging.info("Daily summary including rain amount (cm):")
+    print(daily_summary)
+
+if __name__ == "__main__":
+    main()
