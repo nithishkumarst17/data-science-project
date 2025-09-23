@@ -1,0 +1,85 @@
+import numpy as np
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+
+np.random.seed(42)
+
+num_employees = 500
+employee_ids = [f"E{str(i+1).zfill(3)}" for i in range(num_employees)]
+
+roles = ['Network Engineer', 'Customer Support', 'Sales', 'Technical Support']
+shifts = ['Day', 'Night', 'Rotational']
+
+data = []
+for emp in employee_ids:
+    attendance = np.random.randint(50, 100)
+    avg_work_hours = np.random.uniform(6, 10)
+    late_punch = np.random.randint(0, 15)
+    leaves_taken = np.random.randint(0, 10)
+    department = np.random.choice(['Sales', 'Support', 'IT', 'Marketing', 'HR'])
+    performance = np.random.uniform(5, 10)
+    role_type = np.random.choice(roles)
+    shift_type = np.random.choice(shifts)
+    calls_handled = np.random.randint(0, 50)
+    customer_complaints = np.random.randint(0, 5)
+    projects_completed = np.random.randint(0, 10)
+
+    if attendance < 70 or late_punch > 10 or performance < 6:
+        attrition_prob = 0.7
+    else:
+        attrition_prob = 0.1
+
+    attrition_flag = 'Yes' if np.random.rand() < attrition_prob else 'No'
+
+    data.append([
+        emp, attendance, avg_work_hours, late_punch, leaves_taken,
+        department, performance, role_type, shift_type,
+        calls_handled, customer_complaints, projects_completed,
+        attrition_flag
+    ])
+
+df = pd.DataFrame(data, columns=[
+    'Employee_ID', 'Attendance_Percentage', 'Avg_Work_Hours', 'Late_Punch_Count',
+    'Leaves_Taken', 'Department', 'Performance_Score', 'Role_Type', 'Shift_Type',
+    'Calls_Handled', 'Customer_Complaints', 'Projects_Completed', 'Attrition_Flag'
+])
+
+df_model = pd.get_dummies(df, columns=['Department','Role_Type','Shift_Type'], drop_first=True)
+X = df_model.drop(['Employee_ID', 'Attrition_Flag'], axis=1)
+y = df_model['Attrition_Flag'].map({'Yes':1,'No':0})
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+rf_model = RandomForestClassifier(n_estimators=100, random_state=42)
+rf_model.fit(X_train, y_train)
+
+y_pred = rf_model.predict(X_test)
+print(f"Model Accuracy: {accuracy_score(y_test, y_pred):.2f}\n")
+print("Classification Report:\n", classification_report(y_test, y_pred))
+print("Confusion Matrix:\n", confusion_matrix(y_test, y_pred))
+
+sample_employee = pd.DataFrame({
+    'Attendance_Percentage':[65],
+    'Avg_Work_Hours':[7.5],
+    'Late_Punch_Count':[12],
+    'Leaves_Taken':[4],
+    'Performance_Score':[5.5],
+    'Calls_Handled':[20],
+    'Customer_Complaints':[2],
+    'Projects_Completed':[1],
+    'Department_IT':[0],
+    'Department_Marketing':[0],
+    'Department_Support':[1],
+    'Department_Sales':[0],
+    'Role_Type_Customer Support':[1],
+    'Role_Type_Network Engineer':[0],
+    'Role_Type_Sales':[0],
+    'Shift_Type_Night':[0],
+    'Shift_Type_Rotational':[1]
+})
+
+sample_employee = sample_employee.reindex(columns=X.columns, fill_value=0)
+pred = rf_model.predict(sample_employee)[0]
+print(f"\nSample Employee Attrition Prediction: {'Yes' if pred==1 else 'No'}")
