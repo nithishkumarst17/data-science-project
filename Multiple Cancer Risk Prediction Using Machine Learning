@@ -1,0 +1,65 @@
+import numpy as np
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+
+np.random.seed(42)
+
+num_patients = 1000
+patient_ids = [f"P{str(i+1).zfill(4)}" for i in range(num_patients)]
+cancer_types = ['Breast', 'Lung', 'Skin', 'Cervical', 'None']
+symptoms_list = ['fatigue', 'weight_loss', 'lump', 'persistent_cough', 'skin_lesion', 'bleeding']
+
+data = []
+for pid in patient_ids:
+    age = np.random.randint(20, 80)
+    symptoms = {symptom: np.random.randint(0, 2) for symptom in symptoms_list}
+
+    # Simple logic to assign cancer type
+    if symptoms['lump'] == 1 and age > 40:
+        cancer = 'Breast'
+    elif symptoms['persistent_cough'] == 1 and age > 50:
+        cancer = 'Lung'
+    elif symptoms['skin_lesion'] == 1:
+        cancer = 'Skin'
+    elif symptoms['bleeding'] == 1 and age > 30:
+        cancer = 'Cervical'
+    else:
+        cancer = 'None'
+
+    data.append([pid, age, *symptoms.values(), cancer])
+
+columns = ['Patient_ID', 'Age'] + symptoms_list + ['Cancer_Type']
+df = pd.DataFrame(data, columns=columns)
+
+# Preprocessing
+X = df.drop(['Patient_ID', 'Cancer_Type'], axis=1)
+y = df['Cancer_Type']
+
+# Train-test split
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# Model training
+rf_model = RandomForestClassifier(n_estimators=100, random_state=42)
+rf_model.fit(X_train, y_train)
+
+# Evaluation
+y_pred = rf_model.predict(X_test)
+print(f"Model Accuracy: {accuracy_score(y_test, y_pred):.2f}\n")
+print("Classification Report:\n", classification_report(y_test, y_pred))
+print("Confusion Matrix:\n", confusion_matrix(y_test, y_pred))
+
+# Sample patient prediction
+sample_patient = pd.DataFrame({
+    'Age':[55],
+    'fatigue':[1],
+    'weight_loss':[1],
+    'lump':[0],
+    'persistent_cough':[1],
+    'skin_lesion':[0],
+    'bleeding':[0]
+})
+
+pred = rf_model.predict(sample_patient)[0]
+print(f"\nSample Patient Cancer Prediction: {pred}")
