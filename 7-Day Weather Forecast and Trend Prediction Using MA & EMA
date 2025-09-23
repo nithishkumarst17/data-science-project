@@ -1,0 +1,146 @@
+import requests
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from datetime import datetime, timedelta
+import logging
+
+logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+
+API_KEY = "7104194432c656a6607a91d930c7998a"
+LAT, LON = 12.5266, 78.2150
+NUM_HOURS = 7 * 24
+MA_PERIOD = 5
+EMA_SPAN = 5
+FRACTION = 0.2
+
+def fetch_weather_api(lat, lon):
+    try:
+        url = f"https://api.openweathermap.org/data/2.5/onecall?lat={lat}&lon={lon}&exclude=minutely,alerts&appid={API_KEY}&units=metric"
+        response = requests.get(url, timeout=5)
+        response.raise_for_status()
+        data = response.json()
+        hourly_data = data.get("hourly", [])[:NUM_HOURS]
+        forecast = []
+        for hour in hourly_data:
+            dt = datetime.fromtimestamp(hour["dt"])
+            forecast.append({
+                "datetime": dt,
+                "temperature": hour.get("temp", np.nan),
+                "humidity": hour.get("humidity", np.nan),
+                "wind_kmh": hour.get("wind_speed", np.nan),
+                "rain_prob": hour.get("pop", 0) * 100
+            })
+        logging.info("Weather data fetched from API successfully")
+        return pd.DataFrame(forecast)
+    except Exception as e:
+        logging.warning(f"API fetch failed: {e}")
+        return None
+
+def generate_random_weather(num_hours):
+    now = datetime.now()
+    forecast = []
+    temp_base = np.random.uniform(25, 35)
+    humidity_base = np.random.uniform(50, 80)
+    wind_base = np.random.uniform(5, 15)
+    for i in range(num_hours):
+        dt = now + timedelta(hours=i+1)
+        hour_of_day = dt.hour
+        temp_variation = 5 * np.sin((hour_of_day / 24) * 2 * np.pi)
+        temp = temp_base + temp_variation + np.random.uniform(-2, 2)
+        humidity = humidity_base + np.random.uniform(-10, 10)
+        wind = wind_base + np.random.uniform(-5, 5)
+        rain_prob = np.clip(50 * np.sin((hour_of_day / 24) * 2 * np.pi) + np.random.uniform(0, 50), 0, 100)
+        forecast.append({
+            "datetime": dt,
+            "temperature": round(temp, 1),
+            "humidity": round(humidity, 1),
+            "wind_kmh": round(wind, 1),
+            "rain_prob": round(rain_prob, 1)
+        })
+    logging.info("Random weather data generated")
+    return pd.DataFrame(forecast)
+
+def compute_forecast(df, column, ma_period=MA_PERIOD, ema_span=EMA_SPAN, fraction=FRACTION):
+    df[column + "_MA"] = df[column].rolling(window=ma_period).mean()
+    df[column + "_EMA"] = df[column].ewm(span=ema_span, adjust=False).mean()
+    latest_ma = df[column + "_MA"].iloc[-1]
+    latest_ema = df[column + "_EMA"].iloc[-1]
+    min_val = df[column].min()
+    max_val = df[column].max()
+    value_range = max_val - min_val
+    if latest_ema > latest_ma:
+        forecast = df[column].iloc[-1] + fraction * value_range
+    elif latest_ema < latest_ma:
+        forecast = df[column].iloc[-1] - fraction * value_range
+    else:
+        forecast = df[column].iloc[-1]
+    return forecast
+
+def plot_hourly_forecast(df):
+    plt.figure(figsize=(18,6))
+    plt.plot(df["datetime"], df["temperature"], 'r-', label="Temperature (°C)")
+    plt.plot(df["datetime"], df["humidity"], 'b-', label="Humidity (%)")
+    plt.plot(df["datetime"], df["wind_kmh"], 'g-', label="Wind Speed (km/h)")
+    plt.plot(df["datetime"], df["rain_prob"], 'c-', label="Rain Probability (%)")
+    plt.xlabel("Date & Time")
+    plt.ylabel("Values")
+    plt.title("7-Day Hourly Weather Forecast")
+    plt.legend()
+    plt.grid(True)
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.show()
+
+def compute_5day_summary(df):
+    df["date"] = df["datetime"].dt.date
+    summary_list = []
+    unique_dates = sorted(df["date"].unique())
+    for i in range(len(unique_dates) - 4):
+        window_dates = unique_dates[i:i+5]
+        window_data = df[df["date"].isin(window_dates)]
+        temp_min = window_data["temperature"].min()
+        temp_max = window_data["temperature"].max()
+        temp_avg = window_data["temperature"].mean()
+        humidity_avg = window_data["humidity"].mean()
+        wind_avg = window_data["wind_kmh"].mean()
+        rain_avg = window_data["rain_prob"].mean()
+        summary_list.append({
+            "Start_Date": window_dates[0],
+            "End_Date": window_dates[-1],
+            "Temp_Min": round(temp_min,1),
+            "Temp_Max": round(temp_max,1),
+            "Temp_Avg": round(temp_avg,1),
+            "Humidity_Avg": round(humidity_avg,1),
+            "Wind_Avg": round(wind_avg,1),
+            "RainProb_Avg": round(rain_avg,1)
+        })
+    return pd.DataFrame(summary_list)
+
+def main():
+    df_forecast = fetch_weather_api(LAT, LON)
+    if df_forecast is None or df_forecast.empty:
+        df_forecast = generate_random_weather(NUM_HOURS)
+
+    logging.info("Displaying first 24 hours of forecast")
+    print(df_forecast.head(24))
+
+    plot_hourly_forecast(df_forecast)
+
+    forecast_temp = compute_forecast(df_forecast, "temperature")
+    forecast_humidity = compute_forecast(df_forecast, "humidity")
+    forecast_wind = compute_forecast(df_forecast, "wind_kmh")
+    forecast_rain = compute_forecast(df_forecast, "rain_prob")
+
+    logging.info("Forecasted next hourly values based on MA & EMA trends:")
+    print(f"Temperature: {forecast_temp:.2f} °C")
+    print(f"Humidity: {forecast_humidity:.2f} %")
+    print(f"Wind Speed: {forecast_wind:.2f} km/h")
+    print(f"Rain Probability: {forecast_rain:.2f} %")
+
+    summary_5day = compute_5day_summary(df_forecast)
+    logging.info("5-Day Continuous Summary (Min, Max, Avg):")
+    print(summary_5day)
+
+if __name__ == "__main__":
+    main()
